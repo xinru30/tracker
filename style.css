@@ -1,0 +1,21 @@
+.app-container {
+    max-width: 480px; /* 限制最大寬度像手機一樣 */
+    margin: 0 auto;   /* 讓它在電腦螢幕置中 */
+    min-height: 100vh;
+    background: #fff;
+}
+
+.page-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr); /* 自動切成等寬 4 欄 */
+    gap: 12px; /* 格子之間的間距 */
+    padding: 16px;
+}
+
+.page-card {
+    aspect-ratio: 2 / 3; /* 寬高比 2:3 */
+    /* 其他置中文字的設定... */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}

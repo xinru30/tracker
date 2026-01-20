@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <link rel="manifest" href="manifest.json">
+
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js');
+  }
+</script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>同人新刊進度 Tracker</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    
+    <style>
+        /* --- 1. 基礎設定 (Reset) --- */
+        :root {
+            --primary: #4a5568;    /* 主色調：深灰 */
+            --accent: #ed64a6;     /* 強調色：粉紅 (適合死線) */
+            --bg-color: #f7fafc;   /* 背景色 */
+            --card-border: #e2e8f0;
+        }
+        
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #e0e0e0; /* 電腦版背景深一點，凸顯手機框 */
+            color: #2d3748;
+        }
+
+        /* --- 2. 手機容器 (App Shell) --- */
+        #app {
+            max-width: 450px;       /* 限制寬度 */
+            margin: 0 auto;         /* 置中 */
+            background-color: #fff;
+            min-height: 100vh;      /* 至少佔滿高 */
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+        }
+
+        /* --- 3. 頂部儀表板 (Header) --- */
+        header {
+            background-color: #fff;
+            padding: 20px;
+            border-bottom: 1px solid var(--card-border);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 15px;
+        }
+
+        .input-group input[type="text"] {
+            font-size: 1.25rem;
+            font-weight: bold;
+            border: none;
+            border-bottom: 2px solid #edf2f7;
+            width: 100%;
+            padding: 5px 0;
+            color: var(--primary);
+            outline: none;
+        }
+        
+        .input-group input[type="text"]:focus { border-color: var(--accent); }
+
+        .deadline-box {
+            background: var(--bg-color);
+            padding: 8px 12px;
+            border-radius: 8px;
+            text-align: center;
+            min-width: 70px;
+        }
+        
+        .deadline-num { font-size: 1.5rem; font-weight: 800; line-height: 1.2; }
+        .deadline-label { font-size: 0.75rem; color: #718096; }
+        .text-danger { color: #e53e3e; }
+
+        /* 進度條樣式 */
+        .progress-container {
+            margin-top: 10px;
+        }
+        .progress-info {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.85rem;
+            color: #718096;
+            margin-bottom: 5px;
+        }
+        .progress-bar-bg {
+            background-color: #edf2f7;
+            height: 10px;
+            border-radius: 99px;
+            overflow: hidden;
+        }
+        .progress-bar-fill {
+            height: 100%;
+            background-color: #48bb78; /* 綠色 */
+            transition: width 0.3s ease;
+        }
+
+        /* --- 4. 頁面網格 (Grid Area) --- */
+        main {
+            flex: 1;
+            padding: 15px;
+            background-color: var(--bg-color);
+            overflow-y: auto;
+        }
+
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .btn-small {
+            background: white;
+            border: 1px solid #cbd5e0;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            cursor: pointer;
+        }
+        .btn-small:active { background: #edf2f7; }
+
+        /* 核心 Grid 設定 */
+        .page-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr); /* 4欄 */
+            gap: 10px; /* 間距 */
+            padding-bottom: 60px; /* 預留底部空間 */
+        }
+
+        /* 每一頁的卡片 */
+        .page-card {
+            aspect-ratio: 2 / 3; /* 關鍵：保持書本比例 */
+            background: white;
+            border: 2px solid transparent; /* 預留邊框位置 */
+            border-radius: 6px;
+            position: relative;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.9rem;
+            font-weight: bold;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            transition: transform 0.1s, border-color 0.2s;
+            user-select: none;
+        }
+
+        .page-card:active { transform: scale(0.96); }
+
+        .page-num {
+            position: absolute;
+            top: 4px;
+            left: 6px;
+            font-size: 0.7rem;
+            color: #a0aec0;
+            font-weight: normal;
+        }
+
+        /* --- 5. 狀態顏色樣式 (對應 JS 邏輯) --- */
+        .status-0 { background: #fff; border-color: #e2e8f0; color: #cbd5e0; } /* 空白 */
+        .status-1 { background: #ebf8ff; border-color: #90cdf4; color: #3182ce; } /* 分鏡 (藍) */
+        .status-2 { background: #fffff0; border-color: #f6e05e; color: #d69e2e; } /* 草稿 (黃) */
+        .status-3 { background: #faf5ff; border-color: #d6bcfa; color: #805ad5; } /* 線稿 (紫) */
+        .status-4 { background: #f0fff4; border-color: #68d391; color: #2f855a; } /* 完稿 (綠) */
+
+        /* --- 6. 底部 (Footer) --- */
+        footer {
+            padding: 10px;
+            background: #fff;
+            text-align: center;
+            font-size: 0.75rem;
+            color: #a0aec0;
+            border-top: 1px solid #edf2f7;
+        }
+    </style>
+</head>
+<body>
+
+<div id="app">
+    <header>
+        <div class="header-top">
+            <div class="input-group">
+                <input v-model="project.title" type="text" placeholder="輸入刊名...">
+                <div style="margin-top: 5px;">
+                    <label style="font-size: 0.75rem; color:#a0aec0;">截稿日: </label>
+                    <input type="date" v-model="project.deadline" style="border:none; color:#718096; font-size: 0.8rem;">
+                </div>
+            </div>
+            <div class="deadline-box">
+                <div class="deadline-label">剩餘</div>
+                <div class="deadline-num" :class="{'text-danger': daysLeft < 7}">{{ daysLeft }}</div>
+                <div class="deadline-label">天</div>
+            </div>
+        </div>
+
+        <div class="progress-container">
+            <div class="progress-info">
+                <span>進度 ({{ completedCount }}/{{ project.totalPages }})</span>
+                <span>{{ progressPercentage }}%</span>
+            </div>
+            <div class="progress-bar-bg">
+                <div class="progress-bar-fill" :style="{ width: progressPercentage + '%' }"></div>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <div class="controls">
+            <h3 style="font-size: 1rem; color: #4a5568;">
+                <i class="fas fa-layer-group"></i> 頁面狀態
+            </h3>
+            <div>
+                <button class="btn-small" @click="changeTotalPages(-4)">-4頁</button>
+                <button class="btn-small" @click="changeTotalPages(4)" style="margin-left:5px;">+4頁</button>
+            </div>
+        </div>
+
+        <div class="page-grid">
+            <div 
+                v-for="(page, index) in project.pages" 
+                :key="index"
+                @click="nextStatus(index)"
+                class="page-card"
+                :class="'status-' + page.status"
+            >
+                <span class="page-num">{{ index + 1 }}</span>
+                <span>{{ getStatusLabel(page.status) }}</span>
+                <i v-if="page.status === 4" class="fas fa-check" style="position: absolute; bottom: 5px; right: 5px; font-size: 0.8rem;"></i>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        點擊格子切換: 空白 &to; 分鏡 &to; 草稿 &to; 線稿 &to; 完稿
+    </footer>
+</div>
+
+<script>
+    const { createApp, ref, computed, watch, onMounted } = Vue;
+
+    createApp({
+        setup() {
+            // 狀態定義
+            const statusLabels = ['空白', '分鏡', '草稿', '線稿', '完稿'];
+
+            const defaultProject = {
+                title: '原創本 Vol.1',
+                deadline: new Date().toISOString().split('T')[0],
+                totalPages: 16,
+                pages: Array(16).fill({ status: 0 })
+            };
+
+            const project = ref({ ...defaultProject });
+
+            // 讀取紀錄
+            onMounted(() => {
+                const saved = localStorage.getItem('doujin-tracker-css'); // 改個key避免衝突
+                if (saved) {
+                    try { project.value = JSON.parse(saved); } catch(e) {}
+                }
+            });
+
+            watch(project, (newVal) => {
+                localStorage.setItem('doujin-tracker-css', JSON.stringify(newVal));
+            }, { deep: true });
+
+            const daysLeft = computed(() => {
+                const today = new Date();
+                const target = new Date(project.value.deadline);
+                const diffTime = target - today;
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+                return diffDays > 0 ? diffDays : 0;
+            });
+
+            const completedCount = computed(() => project.value.pages.filter(p => p.status === 4).length);
+            const progressPercentage = computed(() => {
+                return project.value.totalPages === 0 ? 0 : Math.round((completedCount.value / project.value.totalPages) * 100);
+            });
+
+            const nextStatus = (index) => {
+                let next = project.value.pages[index].status + 1;
+                if (next >= statusLabels.length) next = 0;
+                project.value.pages[index] = { status: next }; 
+            };
+
+            const changeTotalPages = (delta) => {
+                const newTotal = project.value.totalPages + delta;
+                if (newTotal < 4) return;
+                project.value.totalPages = newTotal;
+                if (delta > 0) {
+                    for(let i=0; i<delta; i++) project.value.pages.push({ status: 0 });
+                } else {
+                    project.value.pages.splice(newTotal, -delta);
+                }
+            };
+
+            return {
+                project, daysLeft, completedCount, progressPercentage,
+                nextStatus, changeTotalPages,
+                getStatusLabel: (s) => statusLabels[s]
+            };
+        }
+    }).mount('#app');
+</script>
+
+</body>
+</html>
